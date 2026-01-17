@@ -1,0 +1,42 @@
+[
+  {
+    "id": "1",
+    "messages": [
+      {"role": "system", "content": "You are a helpful customer support assistant."},
+      {"role": "user", "content": "How do I reset my password?"}
+    ],
+    "metadata": {"category": "customer_support", "complexity": "simple"}
+  },
+  {
+    "id": "2",
+    "messages": [
+      {"role": "system", "content": "You are a code generation assistant."},
+      {"role": "user", "content": "Write a Python function to calculate fibonacci numbers using recursion."}
+    ],
+    "metadata": {"category": "code_generation", "complexity": "medium"}
+  },
+  {
+    "id": "3",
+    "messages": [
+      {"role": "system", "content": "You are a JSON extraction assistant. Extract structured data from text."},
+      {"role": "user", "content": "Extract the product name and price from: 'iPhone 15 Pro costs $999'"}
+    ],
+    "metadata": {"category": "data_extraction", "complexity": "simple"}
+  },
+  {
+    "id": "4",
+    "messages": [
+      {"role": "system", "content": "You are a text summarization assistant."},
+      {"role": "user", "content": "Summarize this in one sentence: Machine learning is a subset of artificial intelligence that enables computers to learn from data without being explicitly programmed. It uses algorithms to identify patterns and make decisions."}
+    ],
+    "metadata": {"category": "summarization", "complexity": "simple"}
+  },
+  {
+    "id": "5",
+    "messages": [
+      {"role": "system", "content": "You are a technical assistant."},
+      {"role": "user", "content": "Explain the difference between SQL and NoSQL databases in 2-3 sentences."}
+    ],
+    "metadata": {"category": "technical_qa", "complexity": "medium"}
+  }
+]
