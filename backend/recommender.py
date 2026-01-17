@@ -5,8 +5,8 @@ Analyzes replay results and provides intelligent model recommendations
 
 import logging
 from typing import List, Dict
-from backend.schemas import QualityMetrics, Recommendation, ParetoPoint
-from backend.quality_scorer import quality_scorer
+from schemas import QualityMetrics, Recommendation, ParetoPoint
+from quality_scorer import quality_scorer
 
 logger = logging.getLogger(__name__)
 

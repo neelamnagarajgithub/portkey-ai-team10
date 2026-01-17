@@ -8,3 +8,7 @@ pandas==2.2.3
 python-multipart==0.0.12
 aiofiles==24.1.0
 python-dotenv==1.0.1
+chromadb
+portkey-ai==1.10.1  # Portkey SDK   
+portkey_ai
+psycopg2-binary==2.9.9

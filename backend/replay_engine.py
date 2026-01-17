@@ -7,8 +7,8 @@ import time
 import logging
 from typing import List, Dict
 from portkey_ai import Portkey
-from backend.schemas import HistoricalPrompt, ReplayResult
-from backend.portkey_client import portkey_client
+from schemas import HistoricalPrompt, ReplayResult
+from client.portkey_client import portkey_client
 import os
 
 logger = logging.getLogger(__name__)
@@ -159,14 +159,35 @@ class ReplayEngine:
         prompts: List[HistoricalPrompt],
         models: List[str],
         temperature: float = 0.0,
-        max_tokens: int = 1000
+        max_tokens: int = 1000,
+        use_validation: bool = True,
+        validation_phase: str = "discovery"
     ) -> List[ReplayResult]:
-        """Replay multiple prompts across multiple models via Portkey"""
+        """
+        Replay multiple prompts across multiple models via Portkey with automatic validation
+        
+        Args:
+            prompts: List of prompts to replay
+            models: Models to test
+            temperature: Sampling temperature
+            max_tokens: Max completion tokens
+            use_validation: Enable hybrid validation (default: True)
+            validation_phase: "discovery" or "production" (affects validation strategy)
+        """
+        # Import here to avoid circular dependency
+        if use_validation:
+            try:
+                from validator.hybrid_validator import hybrid_validator
+            except ImportError:
+                logger.warning("hybrid_validator not available, validation disabled")
+                use_validation = False
         
         results = []
         total_calls = len(prompts) * len(models)
         
         logger.info(f"Starting replay via Portkey Model Catalog: {len(prompts)} prompts x {len(models)} models = {total_calls} calls")
+        if use_validation:
+            logger.info(f"Validation enabled (phase: {validation_phase})")
         
         for i, prompt in enumerate(prompts):
             for model in models:
@@ -178,6 +199,35 @@ class ReplayEngine:
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
+                
+                # Validate output if enabled and successful
+                if use_validation and result.success and result.output:
+                    try:
+                        # Import asyncio for async LLM judge
+                        import asyncio
+                        
+                        validation = hybrid_validator.validate(
+                            prompt=prompt,
+                            output=result.output,
+                            model=model,
+                            phase=validation_phase
+                        )
+                        
+                        # If validation returns a coroutine, await it
+                        if hasattr(validation, '__await__'):
+                            validation = asyncio.run(validation)
+                        
+                        # Add validation results
+                        result.validation_score = validation.score
+                        result.validation_method = validation.method
+                        result.validation_confidence = validation.confidence
+                        
+                        logger.info(
+                            f"  └─ Validated: {validation.score:.1f}/100 "
+                            f"({validation.method}, {validation.confidence})"
+                        )
+                    except Exception as e:
+                        logger.error(f"  └─ Validation failed: {e}")
                 
                 results.append(result)
                 

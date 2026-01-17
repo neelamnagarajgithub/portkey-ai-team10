@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import uvicorn
 
-from backend.schemas import (
+from schemas import (
     ReplayRequest,
     AnalysisReport,
     HistoricalPrompt,
@@ -18,9 +18,9 @@ from backend.schemas import (
     Recommendation,
     ParetoPoint
 )
-from backend.replay_engine import replay_engine
-from backend.quality_scorer import quality_scorer
-from backend.recommender import recommendation_engine
+from replay_engine import replay_engine
+from quality_scorer import quality_scorer
+from recommender import recommendation_engine
 
 # Setup logging
 logging.basicConfig(

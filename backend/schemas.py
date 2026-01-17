@@ -45,6 +45,11 @@ class ReplayResult(BaseModel):
     is_refusal: bool = False
     schema_valid: bool = True
     
+    # Validation scores (from hybrid validator)
+    validation_score: Optional[float] = None
+    validation_method: Optional[str] = None
+    validation_confidence: Optional[str] = None
+    
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
@@ -68,6 +73,7 @@ class QualityMetrics(BaseModel):
     # Quality scores
     consistency_score: float = Field(ge=0.0, le=1.0, description="How consistent outputs are")
     schema_compliance_rate: float = Field(ge=0.0, le=1.0)
+    avg_validation_score: float = Field(default=0.0, ge=0.0, le=100.0, description="Average validation score from hybrid validator")
 
 
 class ParetoPoint(BaseModel):

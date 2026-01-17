@@ -1,0 +1,11 @@
+venv
+backend/__pycache__
+.env
+backend/SOL ID_ARCHITECTURE.md
+backend/classifier/__pycache__
+backend/validator/__pycache__
+backend/promptbuilder/__pycache__
+backend/judge/__pycache__
+backend/client/__pycache__
+backend/db/__pycache__
+backend/__pycache__
