@@ -7,7 +7,7 @@ import logging
 from typing import List, Dict
 from collections import defaultdict
 import statistics
-from schemas import ReplayResult, QualityMetrics
+from backend.schemas import ReplayResult, QualityMetrics
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import uvicorn
 
-from schemas import (
+from backend.schemas import (
     ReplayRequest,
     AnalysisReport,
     HistoricalPrompt,
@@ -18,9 +18,9 @@ from schemas import (
     Recommendation,
     ParetoPoint
 )
-from replay_engine import replay_engine
-from quality_scorer import quality_scorer
-from recommender import recommendation_engine
+from backend.replay_engine import replay_engine
+from backend.quality_scorer import quality_scorer
+from backend.recommender import recommendation_engine
 
 # Setup logging
 logging.basicConfig(
@@ -87,7 +87,7 @@ async def replay_and_analyze(request: ReplayRequest):
             temperature=request.temperature,
             max_tokens=request.max_tokens
         )
-        
+        print(results)
         # Step 2: Calculate quality metrics per model
         metrics_dict = quality_scorer.aggregate_metrics(results)
         
