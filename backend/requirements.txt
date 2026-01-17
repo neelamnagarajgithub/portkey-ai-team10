@@ -68,8 +68,8 @@ packaging==25.0
 portkey-ai==2.1.0
 posthog==5.4.0
 propcache==0.4.1
-protobuf==6.33.4
-psycopg2-binary==2.9.9
+protobuf
+psycopg2-binary
 pulsar-client==3.9.0
 pybase64==1.4.3
 pydantic==2.12.5

@@ -9,10 +9,10 @@ from typing import List, Dict, Optional
 from abc import ABC, abstractmethod
 from portkey_ai import Portkey
 
-from schemas import HistoricalPrompt
-from judge.schema import JudgeScore, ComparisonResult
-from client.portkey_client import portkey_client
-from promptbuilder.eval import EvalPromptBuilder
+from backend.schemas import HistoricalPrompt
+from backend.judge.schema import JudgeScore, ComparisonResult
+from backend.client.portkey_client import portkey_client
+from backend.promptbuilder.eval import EvalPromptBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ class LLMJudge:
     
     def _create_default_client(self) -> ILLMClient:
         """Factory method for default client"""
-        api_key = os.environ.get("PORTKEY_API_KEY")
+        api_key = "TqVI5Ll6jQNk4hfqHEGCK0G2tfBL"
         if not api_key:
             raise ValueError("PORTKEY_API_KEY not set in environment")
         return PortkeyLLMClient(api_key)
@@ -247,7 +247,7 @@ class LLMJudge:
             logger.error(f"LLM judge evaluation failed: {e}", exc_info=True)
             return self._create_fallback_score(str(e))
     
-    def compare_outputs(
+    async def compare_outputs(
         self,
         prompt: HistoricalPrompt,
         outputs: Dict[str, str],
@@ -292,7 +292,7 @@ class LLMJudge:
                     
                     messages = [{"role": "user", "content": comparison_prompt}]
                     
-                    result = self.llm_client.create_completion(
+                    result = await self.llm_client.create_completion(
                         model=judge_model,
                         messages=messages,
                         temperature=0.0,

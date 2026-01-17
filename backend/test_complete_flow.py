@@ -5,6 +5,12 @@ Tests the full flow: Replay → Validation → Quality Scoring → Recommendatio
 
 import asyncio
 import json
+import sys
+from pathlib import Path
+
+# Add backend to path so we can import without 'backend.' prefix
+sys.path.insert(0, str(Path(__file__).parent))
+
 from schemas import HistoricalPrompt
 from replay_engine import ReplayEngine
 from quality_scorer import QualityScorer
@@ -60,13 +66,13 @@ async def test_complete_flow():
         if result.validation_score is not None:
             validated_count += 1
             print(f"\n{result.model}:")
-            print(f"  Output: {result.output}")
+            print(f"  Output: {result.output[:100]}..." if result.output and len(result.output) > 100 else f"  Output: {result.output}")
             print(f"  Validation: {result.validation_score:.1f}/100")
             print(f"  Method: {result.validation_method}")
             print(f"  Confidence: {result.validation_confidence}")
             print(f"  Cost: ${result.cost_usd:.6f}")
     
-    validation_rate = (validated_count / len(results)) * 100
+    validation_rate = (validated_count / len(results)) * 100 if len(results) > 0 else 0
     print(f"\n📈 Validation Rate: {validation_rate:.0f}% ({validated_count}/{len(results)})")
     
     if validation_rate < 100:

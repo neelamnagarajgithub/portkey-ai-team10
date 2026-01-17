@@ -7,14 +7,15 @@ import logging
 import random
 from typing import Optional
 from pydantic import BaseModel, Field
-from schemas import HistoricalPrompt
-from llm_judge import llm_judge
-from judge.schema import JudgeScore
-from validator.heuristic_validator import heuristic_validator, HeuristicScore
-from db.historical_db import historical_db, DBResult
-from classifier import scenario_classifier, extract_provider, get_model_family
-from classifier.scenario_config import get_scenario_config, should_use_llm_judge
-from validator.cache_strategy import SmartCacheStrategy
+from backend.schemas import HistoricalPrompt
+from backend.llm_judge import llm_judge
+from backend.judge.schema import JudgeScore
+from backend.validator.heuristic_validator import heuristic_validator, HeuristicScore
+from backend.db.historical_db import historical_db, DBResult
+from backend.classifier.scenario_classifier import scenario_classifier
+from backend.classifier.model_families import extract_provider, get_model_family
+from backend.classifier.scenario_config import get_scenario_config, should_use_llm_judge
+from backend.validator.cache_strategy import SmartCacheStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -23,50 +24,51 @@ class ValidationScore(BaseModel):
     """Unified validation result"""
     score: float = Field(ge=0, le=100, description="Quality score 0-100")
     method: str = Field(description="Primary validation method used")
-    confidence: str = Field(description="HIGH, MEDIUM, or LOW")
-    reasoning: str
+    confidence: str = Field(description="Confidence level: HIGH, MEDIUM, LOW")
+    breakdown: dict = Field(default_factory=dict, description="Scores from each method")
+    reasoning: str = Field(default="", description="Human-readable explanation")
     
-    # Supporting evidence
+    # Individual scores for debugging
     llm_judge_score: Optional[float] = None
     heuristic_score: Optional[float] = None
     db_score: Optional[float] = None
     
-    # Metadata
+    # Methods used for transparency
     methods_used: list = Field(default_factory=list)
 
 
 class HybridValidator:
     """
-    Intelligent validation using multiple methods with fallback
+    Intelligent validator that combines multiple validation methods
+    
+    Strategy:
+    1. Smart cache lookup (4-level hierarchy)
+    2. Fast heuristics (always run - catches obvious failures)
+    3. LLM judge (expensive - use strategically based on scenario)
+    4. Ensemble (combine all available signals)
+    
+    Automatically stores results to DB for future cache hits
     """
     
-    def __init__(
-        self,
-        use_llm_judge: bool = True,
-        llm_judge_budget: float = 100.0,  # Max $ for judge calls
-        llm_judge_sample_rate: float = 1.0  # Use judge on % of prompts
-    ):
-        """
-        Initialize Hybrid Validator
-        
-        Args:
-            use_llm_judge: Whether to use LLM judge
-            llm_judge_budget: Maximum budget for LLM judge calls
-            llm_judge_sample_rate: Percentage of prompts to validate with LLM judge (0.0-1.0)
-        """
-        self.use_llm_judge = use_llm_judge
-        self.llm_judge_budget = llm_judge_budget
-        self.llm_judge_sample_rate = llm_judge_sample_rate
-        self.llm_judge_cost = 0.0
+    def __init__(self):
+        # Initialize all components
+        self.scenario_classifier = scenario_classifier  # ← ADD THIS
         self.cache_strategy = SmartCacheStrategy(historical_db)
-        self.scenario_classifier = scenario_classifier
+        self.use_llm_judge = True
+        self.llm_judge_budget = 10.0  # $10 max for LLM judge calls
+        self.llm_judge_cost = 0.0
+        self.llm_judge_sample_rate = 0.30  # 30% in discovery
         
+        # Stats tracking
         self.stats = {
             "llm_judge_calls": 0,
             "heuristic_calls": 0,
             "db_hits": 0,
-            "db_misses": 0
+            "db_misses": 0,
+            "spent_budget": 0.0
         }
+        
+        logger.info("HybridValidator initialized")
     
     def validate(
         self,
@@ -173,6 +175,9 @@ class HybridValidator:
                     scenario_config=scenario_config
                 )
                 
+                # Store result in database
+                self._cache_result(prompt, output, model, score, "ensemble", "HIGH", scenario)
+                
                 # Cache this result for future lookups
                 return ValidationScore(
                     score=score,
@@ -193,8 +198,8 @@ class HybridValidator:
         
         confidence = "MEDIUM" if cache_result else heuristic_result.confidence
         
-        # Cache heuristic result
-        self._cache_result(prompt, model, output, score, "heuristics", confidence)
+        # Cache heuristic result (fix: correct parameter order)
+        self._cache_result(prompt, output, model, score, "heuristics", confidence, scenario)
         
         return ValidationScore(
             score=score,
@@ -344,7 +349,9 @@ class HybridValidator:
             if scenario is None:
                 scenario = self.scenario_classifier.classify(prompt_text)
             
-            historical_db.store_validation(
+            logger.info(f"Storing validation result: model={model}, score={score:.1f}, method={method}, confidence={confidence}")
+            
+            success = historical_db.store_validation(
                 prompt_text=prompt_text,
                 model=model,
                 provider=provider,
@@ -354,8 +361,14 @@ class HybridValidator:
                 method=method,
                 confidence=confidence
             )
+            
+            if success:
+                logger.info(f"✅ Successfully cached validation result for {model}")
+            else:
+                logger.warning(f"⚠️ Failed to cache validation result for {model} - check logs above for details")
+                
         except Exception as e:
-            logger.error(f"Failed to cache result: {e}")
+            logger.error(f"❌ Exception in _cache_result: {e}", exc_info=True)
     
     def _format_prompt(self, prompt: HistoricalPrompt) -> str:
         """Format prompt for storage/lookup"""

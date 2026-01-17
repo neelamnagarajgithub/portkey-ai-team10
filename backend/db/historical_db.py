@@ -39,6 +39,16 @@ class SupabaseDB:
         
         self.table = "validation_results"
         logger.info(f"SupabaseDB initialized (REST API): {self.url}")
+        logger.info(f"Table: {self.table}")
+        
+        # Verify credentials are set
+        if not self.url or not self.key:
+            logger.warning("⚠️ Supabase URL or KEY not set - database storage will fail!")
+            logger.warning(f"   SUPABASE_URL: {'SET' if self.url else 'MISSING'}")
+            logger.warning(f"   SUPABASE_KEY: {'SET' if self.key else 'MISSING'}")
+        else:
+            logger.info(f"✅ Supabase credentials configured")
+            logger.debug(f"   API Key (first 10 chars): {self.key[:10]}..." if len(self.key) > 10 else "   API Key: [SHORT]")
     
     def store_validation(
         self,
@@ -68,17 +78,28 @@ class SupabaseDB:
                 "procedure": procedure
             }
             
-            response = requests.post(url, headers=self.headers, json=data)
+            logger.info(f"📤 Storing validation to Supabase: model={model}, score={score:.1f}, method={method}")
+            logger.debug(f"   URL: {url}")
+            logger.debug(f"   Data keys: {list(data.keys())}")
+            
+            response = requests.post(url, headers=self.headers, json=data, timeout=10)
             
             if response.status_code in [200, 201]:
-                logger.debug(f"✅ Stored validation for {model}: {score}/100")
+                logger.info(f"✅ Successfully stored validation for {model}: {score}/100 (method: {method})")
                 return True
             else:
-                logger.error(f"❌ Failed to store: {response.status_code} - {response.text}")
+                logger.error(f"❌ Failed to store validation: HTTP {response.status_code}")
+                logger.error(f"   Response: {response.text}")
+                logger.error(f"   URL: {url}")
+                logger.error(f"   Model: {model}, Score: {score}, Method: {method}")
                 return False
                 
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Network error storing validation: {e}")
+            logger.error(f"   URL: {url if 'url' in locals() else 'N/A'}")
+            return False
         except Exception as e:
-            logger.error(f"Failed to store validation: {e}")
+            logger.error(f"❌ Unexpected error storing validation: {e}", exc_info=True)
             return False
     
     def find_similar(

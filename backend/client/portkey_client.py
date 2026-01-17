@@ -20,6 +20,46 @@ class PortkeyPricingClient:
     def __init__(self):
         self._cache: Dict[str, Dict] = {}
         
+    def _normalize_model_name(self, provider: str, model: str) -> tuple[str, str]:
+        """Normalize provider and model names for Portkey Pricing API"""
+        
+        # Clean provider name (remove @ prefixes and extract actual provider)
+        clean_provider = provider.replace("@openai/", "").replace("@anthropic/", "").replace("@vertex/", "")
+        
+        # If provider still looks like a model name (e.g., "gpt-4o"), extract the real provider
+        if any(x in clean_provider.lower() for x in ["gpt", "o1", "davinci", "turbo"]):
+            clean_provider = "openai"
+        elif any(x in clean_provider.lower() for x in ["claude", "anthropic"]):
+            clean_provider = "anthropic"
+        elif any(x in clean_provider.lower() for x in ["gemini", "llama", "vertex"]):
+            clean_provider = "google"
+    
+        # Map internal providers to Portkey API providers
+        provider_mapping = {
+            "openai": "openai",
+            "anthropic": "anthropic",
+            "google": "vertex-ai",
+            "vertex-ai": "vertex-ai",
+        }
+        
+        # Map to API provider
+        api_provider = provider_mapping.get(clean_provider.lower(), "openai")
+        
+        # Clean model name (remove prefixes like @openai/, @vertex/, etc.)
+        clean_model = model.replace("@openai/", "").replace("@vertex/", "").replace("@anthropic/", "")
+        
+        # Special handling for Vertex models
+        if api_provider == "vertex-ai":
+            vertex_model_mapping = {
+                "gemini-2.5-pro": "gemini-pro-002",
+                "gemini-2.0-flash-exp": "gemini-flash-exp",
+            }
+            clean_model = vertex_model_mapping.get(clean_model, clean_model)
+    
+        logger.debug(f"Normalized: provider='{provider}' → '{api_provider}', model='{model}' → '{clean_model}'")
+    
+        return (api_provider, clean_model)
+        
     @lru_cache(maxsize=1000)
     def get_pricing(self, provider: str, model: str) -> Optional[Dict]:
         """
@@ -27,50 +67,48 @@ class PortkeyPricingClient:
         
         Returns dict with structure:
         {
-            "pricing_config": {
-                "pay_as_you_go": {
-                    "request_token": {"price": 0.0000025},  # dollars per token
-                    "response_token": {"price": 0.00001},
-                    "cache_read_input_token": {"price": 0.00000125},
-                    ...
-                },
-                "currency": "USD"
+            "pay_as_you_go": {
+                "request_token": {"price": 0.00025},
+                "response_token": {"price": 0.001},
+                ...
             }
         }
         """
-        cache_key = f"{provider}/{model}"
+        # Normalize names for API
+        api_provider, api_model = self._normalize_model_name(provider, model)
+        cache_key = f"{api_provider}/{api_model}"
         
         # Check memory cache first
         if cache_key in self._cache:
-            logger.debug(f"Cache hit for {cache_key}")
+            logger.debug(f"💾 Cache hit for {cache_key}")
             return self._cache[cache_key]
         
         try:
-            url = f"{self.BASE_URL}/{provider}/{model}"
-            logger.debug(f"Fetching pricing from {url}")
+            url = f"{self.BASE_URL}/{api_provider}/{api_model}"
+            logger.debug(f"🌐 Fetching pricing from {url}")
             
             response = requests.get(url, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
                 self._cache[cache_key] = data
-                logger.info(f"Fetched pricing for {cache_key}")
+                logger.info(f"✅ Fetched pricing for {cache_key}")
                 return data
             elif response.status_code == 404:
-                logger.warning(f"Pricing not found for {cache_key} (404)")
+                logger.warning(f"⚠️  Pricing not found for {cache_key} (404) - using fallback")
                 return None
             else:
-                logger.error(f"Error fetching pricing for {cache_key}: HTTP {response.status_code}")
+                logger.error(f"❌ Error fetching pricing for {cache_key}: HTTP {response.status_code}")
                 return None
                 
         except requests.exceptions.Timeout:
-            logger.error(f"Timeout fetching pricing for {cache_key}")
+            logger.error(f"⏱️  Timeout fetching pricing for {cache_key}")
             return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request exception fetching pricing for {cache_key}: {e}")
+            logger.error(f"🔌 Request exception for {cache_key}: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error fetching pricing for {cache_key}: {e}")
+            logger.error(f"💥 Unexpected error for {cache_key}: {e}")
             return None
     
     def calculate_cost(
@@ -81,77 +119,75 @@ class PortkeyPricingClient:
         completion_tokens: int,
         cache_read_tokens: int = 0
     ) -> float:
-        """
-        Calculate cost in USD for a model call
-        
-        Note: Portkey prices are in dollars per token (e.g., 0.0000025 = $2.50 per 1M tokens)
-        """
+        """Calculate cost in USD for a model call"""
         pricing = self.get_pricing(provider, model)
         
         if not pricing:
-            logger.warning(f"No pricing data available for {provider}/{model}, using fallback estimates")
+            logger.debug(f"📊 Using fallback pricing for {model}")
             return self._estimate_cost(model, prompt_tokens, completion_tokens)
         
         try:
-            pay_as_you_go = pricing.get("pricing_config", {}).get("pay_as_you_go", {})
+            # Portkey API returns pay_as_you_go directly
+            pay_as_you_go = pricing.get("pay_as_you_go", {})
             
             if not pay_as_you_go:
-                logger.warning(f"No pay_as_you_go pricing for {provider}/{model}")
+                logger.warning(f"⚠️  No pay_as_you_go pricing for {model}")
                 return self._estimate_cost(model, prompt_tokens, completion_tokens)
             
-            # Extract prices (in dollars per token)
-            input_price = pay_as_you_go.get("request_token", {}).get("price", 0)
-            output_price = pay_as_you_go.get("response_token", {}).get("price", 0)
-            cache_price = pay_as_you_go.get("cache_read_input_token", {}).get("price", 0)
+            # Extract prices (dollars per 1,000 tokens)
+            input_price_per_1k = pay_as_you_go.get("request_token", {}).get("price", 0)
+            output_price_per_1k = pay_as_you_go.get("response_token", {}).get("price", 0)
+            cache_price_per_1k = pay_as_you_go.get("cache_read_input_token", {}).get("price", 0)
             
-            # Calculate total cost in USD
+            # Calculate cost
             cost_usd = (
-                (prompt_tokens * input_price) +
-                (completion_tokens * output_price) +
-                (cache_read_tokens * cache_price)
+                (prompt_tokens / 1000) * input_price_per_1k +
+                (completion_tokens / 1000) * output_price_per_1k +
+                (cache_read_tokens / 1000) * cache_price_per_1k
             )
             
             logger.debug(
-                f"Cost calculation for {model}: "
-                f"{prompt_tokens} input @ ${input_price} + "
-                f"{completion_tokens} output @ ${output_price} = "
-                f"${cost_usd:.6f}"
+                f"💰 {model}: "
+                f"{prompt_tokens} input × ${input_price_per_1k:.4f}/1K + "
+                f"{completion_tokens} output × ${output_price_per_1k:.4f}/1K = "
+                f"${cost_usd:.8f}"
             )
             
             return cost_usd
             
-        except KeyError as e:
-            logger.error(f"Missing key in pricing data for {provider}/{model}: {e}")
-            return self._estimate_cost(model, prompt_tokens, completion_tokens)
         except Exception as e:
-            logger.error(f"Error calculating cost for {provider}/{model}: {e}")
+            logger.error(f"❌ Error calculating cost for {model}: {e}")
             return self._estimate_cost(model, prompt_tokens, completion_tokens)
     
     def _estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
-        """
-        Fallback pricing estimates when Portkey data unavailable
-        Based on common model pricing as of January 2025
-        Prices in $/1M tokens
-        """
+        """Fallback pricing estimates ($/1M tokens)"""
         pricing_map = {
-            # OpenAI models
+            # OpenAI models (updated Jan 2026)
             "gpt-4o": {"input": 2.50, "output": 10.00},
             "gpt-4o-mini": {"input": 0.15, "output": 0.60},
             "gpt-4-turbo": {"input": 10.00, "output": 30.00},
             "gpt-4": {"input": 30.00, "output": 60.00},
             "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+            "o1-preview": {"input": 15.00, "output": 60.00},
+            "o1-mini": {"input": 3.00, "output": 12.00},
             
-            # Anthropic models
+            # Anthropic models (updated Jan 2026)
             "claude-3-5-sonnet": {"input": 3.00, "output": 15.00},
             "claude-3-5-haiku": {"input": 0.80, "output": 4.00},
             "claude-3-opus": {"input": 15.00, "output": 75.00},
             "claude-3-sonnet": {"input": 3.00, "output": 15.00},
             "claude-3-haiku": {"input": 0.25, "output": 1.25},
             
-            # Google models
+            # Google Gemini models
+            "gemini-2.5-pro": {"input": 1.25, "output": 5.00},
             "gemini-2.0-flash": {"input": 0.075, "output": 0.30},
             "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
             "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+            
+            # Vertex AI - Llama models
+            "meta.llama-3.2-90b": {"input": 0.27, "output": 0.27},
+            "meta.llama-3.1-405b": {"input": 0.80, "output": 0.80},
+            "llama-3.1-8b": {"input": 0.05, "output": 0.05},
         }
         
         model_lower = model.lower()
@@ -164,17 +200,18 @@ class PortkeyPricingClient:
                 total_cost = input_cost + output_cost
                 
                 logger.debug(
-                    f"Using estimated pricing for {model} (matched '{key}'): "
-                    f"${total_cost:.6f}"
+                    f"📊 Fallback pricing for {model} (matched '{key}'): "
+                    f"{prompt_tokens} input × ${prices['input']}/1M + "
+                    f"{completion_tokens} output × ${prices['output']}/1M = "
+                    f"${total_cost:.8f}"
                 )
-                
                 return total_cost
         
-        # Ultra fallback: assume moderate pricing ($2/1M tokens average)
+        # Ultra fallback: $2/1M tokens average
         fallback_cost = ((prompt_tokens + completion_tokens) / 1_000_000) * 2.0
         logger.warning(
-            f"No pricing estimate found for {model}, using default rate: "
-            f"${fallback_cost:.6f}"
+            f"⚠️  No pricing data for {model}, using default $2.00/1M: "
+            f"${fallback_cost:.8f}"
         )
         
         return fallback_cost
@@ -190,7 +227,7 @@ class PortkeyPricingClient:
                 "pricing_available": False
             }
         
-        pay_as_you_go = pricing.get("pricing_config", {}).get("pay_as_you_go", {})
+        pay_as_you_go = pricing.get("pay_as_you_go", {})
         
         return {
             "provider": provider,
@@ -198,16 +235,16 @@ class PortkeyPricingClient:
             "pricing_available": True,
             "pricing": pricing,
             "supports_cache": "cache_read_input_token" in pay_as_you_go,
-            "input_price_per_1m": pay_as_you_go.get("request_token", {}).get("price", 0) * 1_000_000,
-            "output_price_per_1m": pay_as_you_go.get("response_token", {}).get("price", 0) * 1_000_000,
-            "currency": pricing.get("pricing_config", {}).get("currency", "USD")
+            "input_price_per_1m": pay_as_you_go.get("request_token", {}).get("price", 0) * 1_000,
+            "output_price_per_1m": pay_as_you_go.get("response_token", {}).get("price", 0) * 1_000,
+            "currency": "USD"
         }
     
     def clear_cache(self):
-        """Clear the pricing cache (useful for testing or forcing refresh)"""
+        """Clear the pricing cache"""
         self._cache.clear()
         self.get_pricing.cache_clear()
-        logger.info("Pricing cache cleared")
+        logger.info("🧹 Pricing cache cleared")
 
 
 # Singleton instance

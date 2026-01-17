@@ -5,7 +5,8 @@ Maximizes cache hits through intelligent fallback hierarchy
 
 from typing import Optional, Dict, List
 from dataclasses import dataclass
-from classifier import get_model_family, get_family_models, get_transfer_confidence
+# Line 8 - fix import path
+from backend.classifier.model_families import get_model_family, get_family_models, get_transfer_confidence
 
 
 @dataclass

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 
@@ -37,6 +37,11 @@ class ReplayResult(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
     cost_usd: float = 0.0
+    
+    @field_serializer('cost_usd')
+    def serialize_cost(self, value: float) -> float:
+        """Round cost to 8 decimal places to avoid scientific notation"""
+        return round(value, 8) if value else 0.0
     
     # Performance metrics
     latency_ms: float = 0.0

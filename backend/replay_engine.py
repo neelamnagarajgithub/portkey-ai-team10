@@ -7,8 +7,8 @@ import time
 import logging
 from typing import List, Dict
 from portkey_ai import Portkey
-from schemas import HistoricalPrompt, ReplayResult
-from client.portkey_client import portkey_client
+from backend.schemas import HistoricalPrompt, ReplayResult
+from backend.client.portkey_client import portkey_client
 import os
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,12 @@ class ReplayEngine:
             "gpt-4o-mini": "@openai/gpt-4o-mini",
             "gpt-4": "@openai/gpt-4",
             "gpt-3.5-turbo": "@openai/gpt-3.5-turbo",
+            "claude-3-5-sonnet-20250122": "@anthropic/claude-3-5-sonnet-20250122",
+            "claude-3-5-haiku-20250122": "@anthropic/claude-3-5-haiku-20250122",
+            "claude-3-opus-20240229": "@anthropic/claude-3-opus-20240229",
             "@vertex/gemini-2.5-pro": "@vertex/gemini-2.5-pro",
             "@vertex/meta.llama-3.2-90b-vision-instruct-maas": "@vertex/meta.llama-3.2-90b-vision-instruct-maas",
             "@vertex/llama3_1@llama-3.1-8b-instruct": "@vertex/llama3_1@llama-3.1-8b-instruct",
-            # "gemini-2.0-flash-exp": "@vertex-ai/gemini-2.0-flash-exp",
-            # "gemini-1.5-pro": "@vertex-ai/gemini-1.5-pro",
         }
         
         logger.info("ReplayEngine initialized successfully with Model Catalog")
@@ -174,12 +175,16 @@ class ReplayEngine:
             use_validation: Enable hybrid validation (default: True)
             validation_phase: "discovery" or "production" (affects validation strategy)
         """
-        # Import here to avoid circular dependency
+        # Import validator ONCE at the start
+        hybrid_validator = None
         if use_validation:
             try:
-                from validator.hybrid_validator import hybrid_validator
-            except ImportError:
-                logger.warning("hybrid_validator not available, validation disabled")
+                from backend.validator.hybrid_validator import hybrid_validator as validator
+                hybrid_validator = validator
+                logger.info("✅ Validation system loaded successfully")
+            except ImportError as e:
+                logger.error(f"❌ FAILED to import hybrid_validator: {e}")
+                logger.error(f"   Make sure backend/validator/hybrid_validator.py exists")
                 use_validation = False
         
         results = []
@@ -187,7 +192,9 @@ class ReplayEngine:
         
         logger.info(f"Starting replay via Portkey Model Catalog: {len(prompts)} prompts x {len(models)} models = {total_calls} calls")
         if use_validation:
-            logger.info(f"Validation enabled (phase: {validation_phase})")
+            logger.info(f"✅ Validation ENABLED (phase: {validation_phase})")
+        else:
+            logger.warning(f"⚠️  Validation DISABLED")
         
         for i, prompt in enumerate(prompts):
             for model in models:
@@ -201,11 +208,11 @@ class ReplayEngine:
                 )
                 
                 # Validate output if enabled and successful
-                if use_validation and result.success and result.output:
+                if use_validation and hybrid_validator and result.success and result.output:
                     try:
-                        # Import asyncio for async LLM judge
-                        import asyncio
+                        logger.info(f"  🔍 Starting validation for {model}...")
                         
+                        # Call validator (it's synchronous, not async)
                         validation = hybrid_validator.validate(
                             prompt=prompt,
                             output=result.output,
@@ -213,36 +220,36 @@ class ReplayEngine:
                             phase=validation_phase
                         )
                         
-                        # If validation returns a coroutine, await it
-                        if hasattr(validation, '__await__'):
-                            validation = asyncio.run(validation)
-                        
                         # Add validation results
                         result.validation_score = validation.score
                         result.validation_method = validation.method
                         result.validation_confidence = validation.confidence
                         
                         logger.info(
-                            f"  └─ Validated: {validation.score:.1f}/100 "
+                            f"  ✅ Validated: {validation.score:.1f}/100 "
                             f"({validation.method}, {validation.confidence})"
                         )
+                        logger.info(f"  💾 Validation result stored in database")
                     except Exception as e:
-                        logger.error(f"  └─ Validation failed: {e}")
+                        logger.error(f"  ❌ Validation failed for {model}: {e}", exc_info=True)
                 
                 results.append(result)
                 
                 # Log result status
                 if result.success:
-                    logger.info(f"✓ Success: {model} - {result.total_tokens} tokens, ${result.cost_usd:.6f}")
+                    validation_info = f", validation={result.validation_score:.1f}" if result.validation_score else ""
+                    logger.info(f"✓ Success: {model} - {result.total_tokens} tokens, ${result.cost_usd:.6f}{validation_info}")
                 else:
                     logger.error(f"✗ Failed: {model} - {result.error}")
         
         # Summary statistics
         successful = sum(1 for r in results if r.success)
         failed = sum(1 for r in results if not r.success)
+        validated = sum(1 for r in results if r.validation_score is not None)
         total_cost = sum(r.cost_usd for r in results if r.success)
         
         logger.info(f"Replay complete: {successful} successful, {failed} failed, ${total_cost:.6f} total cost")
+        logger.info(f"Validation: {validated}/{len(results)} results validated ({validated/len(results)*100:.1f}%)")
         
         return results
     

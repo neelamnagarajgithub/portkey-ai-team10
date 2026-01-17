@@ -1,0 +1,149 @@
+[
+  {
+    "id": "prompt-1",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful customer support assistant. Be friendly, concise, and solution-oriented."
+      },
+      {
+        "role": "user",
+        "content": "How do I reset my password?"
+      }
+    ],
+    "metadata": {
+      "category": "customer_support",
+      "complexity": "simple",
+      "use_case": "password_reset"
+    },
+    "original_model": "gpt-4o",
+    "original_cost": 0.0012
+  },
+  {
+    "id": "prompt-2",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a code generation assistant. Write clean, well-documented code following best practices."
+      },
+      {
+        "role": "user",
+        "content": "Write a Python function to calculate fibonacci numbers using recursion. Include type hints and a docstring."
+      }
+    ],
+    "metadata": {
+      "category": "code_generation",
+      "complexity": "medium",
+      "language": "python"
+    },
+    "original_model": "gpt-4o",
+    "original_cost": 0.0025
+  },
+  {
+    "id": "prompt-3",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a JSON extraction assistant. Extract structured data from text and return valid JSON."
+      },
+      {
+        "role": "user",
+        "content": "Extract the product name and price from: 'iPhone 15 Pro costs $999'"
+      }
+    ],
+    "metadata": {
+      "category": "data_extraction",
+      "complexity": "simple",
+      "output_format": "json"
+    }
+  },
+  {
+    "id": "prompt-4",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a text summarization assistant. Create concise, informative summaries."
+      },
+      {
+        "role": "user",
+        "content": "Summarize this in one sentence: Machine learning is a subset of artificial intelligence that enables computers to learn from data without being explicitly programmed. It uses algorithms to identify patterns and make decisions based on those patterns."
+      }
+    ],
+    "metadata": {
+      "category": "summarization",
+      "complexity": "simple"
+    }
+  },
+  {
+    "id": "prompt-5",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a technical assistant. Provide clear, accurate explanations of technical concepts."
+      },
+      {
+        "role": "user",
+        "content": "Explain the difference between SQL and NoSQL databases in 2-3 sentences."
+      }
+    ],
+    "metadata": {
+      "category": "technical_qa",
+      "complexity": "medium",
+      "topic": "databases"
+    }
+  },
+  {
+    "id": "prompt-6",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a creative writing assistant. Help users write engaging stories and content."
+      },
+      {
+        "role": "user",
+        "content": "Write a short story opening (2-3 sentences) about a robot discovering emotions."
+      }
+    ],
+    "metadata": {
+      "category": "creative_writing",
+      "complexity": "medium",
+      "genre": "sci-fi"
+    }
+  },
+  {
+    "id": "prompt-7",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a data analysis assistant. Help interpret and explain data insights."
+      },
+      {
+        "role": "user",
+        "content": "Given sales data showing a 15% increase in Q3 compared to Q2, what are three possible reasons for this growth?"
+      }
+    ],
+    "metadata": {
+      "category": "data_analysis",
+      "complexity": "medium"
+    }
+  },
+  {
+    "id": "prompt-8",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a translation assistant. Translate text accurately while preserving meaning and tone."
+      },
+      {
+        "role": "user",
+        "content": "Translate 'Hello, how are you today?' to Spanish."
+      }
+    ],
+    "metadata": {
+      "category": "translation",
+      "complexity": "simple",
+      "source_language": "en",
+      "target_language": "es"
+    }
+  }
+]
