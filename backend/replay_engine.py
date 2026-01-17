@@ -27,39 +27,74 @@ class ReplayEngine:
         
         logger.info(f"Portkey API key configured: {self.portkey_api_key[:8]}...")
         
-        # Provider to model mapping
+        # Provider to model mapping (model_name -> portkey_provider)
         self.provider_map = {
-            "gpt-4o": "@openai/gpt-4o",
-            "gpt-4o-mini": "@openai/gpt-4o-mini",
-            "gpt-4": "@openai/gpt-4",
-            "gpt-3.5-turbo": "@openai/gpt-3.5-turbo",
-            "@vertex/gemini-2.5-pro": "@vertex/gemini-2.5-pro",
-            "@vertex/meta.llama-3.2-90b-vision-instruct-maas": "@vertex/meta.llama-3.2-90b-vision-instruct-maas",
-            "@vertex/llama3_1@llama-3.1-8b-instruct": "@vertex/llama3_1@llama-3.1-8b-instruct",
-            # "gemini-2.0-flash-exp": "@vertex-ai/gemini-2.0-flash-exp",
-            # "gemini-1.5-pro": "@vertex-ai/gemini-1.5-pro",
+            # OpenAI models
+            "gpt-4o": "openai",
+            "gpt-4o-mini": "openai",
+            "gpt-4": "openai",
+            "gpt-3.5-turbo": "openai",
+            
+            # Vertex AI models (Google)
+            "gemini-2.5-pro": "google",
+            "gemini-2.0-flash-exp": "google",
+            "gemini-1.5-pro": "google",
+            "gemini-1.5-flash": "google",
+            
+            # Vertex AI - Llama models (hosted on Google Cloud)
+            "meta.llama-3.2-90b-vision-instruct-maas": "google",
+            "meta.llama-3.1-405b-instruct-maas": "google",
+            "llama-3.1-8b-instruct": "google",
+            
+            # Anthropic models
+            "claude-3-5-sonnet-20250122": "anthropic",
+            "claude-3-5-haiku-20250122": "anthropic",
+            "claude-3-opus-20240229": "anthropic",
         }
         
         logger.info("ReplayEngine initialized successfully with Model Catalog")
     
     def get_provider(self, model: str) -> str:
         """Infer provider from model name"""
-        # Direct match
+        # Direct match (case-insensitive)
+        model_lower = model.lower()
+        
+        # Check exact match first
         if model in self.provider_map:
             return self.provider_map[model]
         
-        # Fuzzy match
-        model_lower = model.lower()
+        # Check lowercase match
+        for known_model, provider in self.provider_map.items():
+            if model_lower == known_model.lower():
+                return provider
+        
+        # Fuzzy match by keywords
         if "gpt" in model_lower or "openai" in model_lower:
             return "openai"
         elif "claude" in model_lower or "anthropic" in model_lower:
             return "anthropic"
-        elif "gemini" in model_lower or "vertex" in model_lower:
-            return "vertex-ai"
+        elif any(keyword in model_lower for keyword in ["gemini", "vertex", "llama", "meta."]):
+            return "google"  # Vertex AI uses 'google' provider
         
-        # Default fallback
-        logger.warning(f"Unknown provider for model {model}, defaulting to openai")
+        # Default fallback with warning
+        logger.warning(f"⚠️  Unknown provider for model '{model}', defaulting to 'openai'. Add to provider_map if this is wrong.")
         return "openai"
+    
+    def _get_portkey_model_name(self, model: str) -> str:
+        """
+        Convert model name to Portkey's expected format
+        Portkey Model Catalog uses @provider/model format
+        """
+        provider = self.get_provider(model)
+        
+        # Portkey expects @provider/model format
+        portkey_format_map = {
+            "openai": f"@openai/{model}",
+            "anthropic": f"@anthropic/{model}",
+            "google": f"@vertex/{model}",  # Vertex models use @vertex prefix
+        }
+        
+        return portkey_format_map.get(provider, model)
     
     def replay_single(
         self,
@@ -71,20 +106,20 @@ class ReplayEngine:
         """Replay a single prompt with a specific model via Portkey"""
         
         provider = self.get_provider(model)
+        portkey_model = self._get_portkey_model_name(model)
         
         try:
             start_time = time.time()
             
             # Create Portkey client with provider header
-            # This tells Portkey which provider's API key to use from Model Catalog
             portkey = Portkey(
                 api_key=self.portkey_api_key,
-                provider=provider  # Required: tells Portkey which provider to route to
+                provider=provider  # Tells Portkey which API key to use
             )
             
-            # Call model - Portkey will use the provider API key configured in Model Catalog
+            # Call model via Portkey
             response = portkey.chat.completions.create(
-                model=model,
+                model=portkey_model,  # Use Portkey format (@provider/model)
                 messages=prompt.messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -102,7 +137,7 @@ class ReplayEngine:
             try:
                 cost_usd = portkey_client.calculate_cost(
                     provider=provider,
-                    model=model,
+                    model=model,  # Use original model name for pricing lookup
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens
                 )
@@ -116,7 +151,7 @@ class ReplayEngine:
             # Check for refusals
             is_refusal = self._detect_refusal(output)
             
-            logger.info(f"Successfully called {model} via Portkey ({provider})")
+            logger.info(f"✓ Success: {model} ({provider}) - {total_tokens} tokens, ${cost_usd:.6f}")
             
             return ReplayResult(
                 prompt_id=prompt.id,
@@ -135,15 +170,13 @@ class ReplayEngine:
             
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Error replaying with {model} via Portkey: {error_msg}", exc_info=True)
+            logger.error(f"✗ Failed: {model} ({provider}) - {error_msg}")
             
-            # Provide helpful error messages for Model Catalog
-            if "x-portkey-provider" in error_msg or "x-portkey-config" in error_msg:
-                error_msg += f"\n\n⚠️  Provider configuration required. Make sure {provider.upper()} API key is set in Portkey Model Catalog at https://app.portkey.ai/settings/api-keys"
-            elif "401" in error_msg or "authentication" in error_msg.lower():
-                error_msg += f"\n\n⚠️  Authentication failed. Add your {provider.upper()} API key at https://app.portkey.ai/settings/api-keys"
+            # Provide helpful error messages
+            if "401" in error_msg or "authentication" in error_msg.lower() or "api key" in error_msg.lower():
+                logger.error(f"⚠️  Authentication failed for {provider.upper()}. Add API key at https://app.portkey.ai/settings/api-keys")
             elif "not found" in error_msg.lower() or "404" in error_msg:
-                error_msg += f"\n\n⚠️  Model '{model}' not found. Check model name is correct."
+                logger.error(f"⚠️  Model '{model}' not found. Verify model name and provider configuration.")
             
             return ReplayResult(
                 prompt_id=prompt.id,
@@ -166,11 +199,11 @@ class ReplayEngine:
         results = []
         total_calls = len(prompts) * len(models)
         
-        logger.info(f"Starting replay via Portkey Model Catalog: {len(prompts)} prompts x {len(models)} models = {total_calls} calls")
+        logger.info(f"🚀 Starting replay: {len(prompts)} prompts × {len(models)} models = {total_calls} calls")
         
         for i, prompt in enumerate(prompts):
             for model in models:
-                logger.info(f"Replaying prompt {i+1}/{len(prompts)} with {model}")
+                logger.info(f"📝 Replaying prompt {i+1}/{len(prompts)} with {model}")
                 
                 result = self.replay_single(
                     prompt=prompt,
@@ -180,19 +213,13 @@ class ReplayEngine:
                 )
                 
                 results.append(result)
-                
-                # Log result status
-                if result.success:
-                    logger.info(f"✓ Success: {model} - {result.total_tokens} tokens, ${result.cost_usd:.6f}")
-                else:
-                    logger.error(f"✗ Failed: {model} - {result.error}")
         
         # Summary statistics
         successful = sum(1 for r in results if r.success)
         failed = sum(1 for r in results if not r.success)
         total_cost = sum(r.cost_usd for r in results if r.success)
         
-        logger.info(f"Replay complete: {successful} successful, {failed} failed, ${total_cost:.6f} total cost")
+        logger.info(f"✅ Replay complete: {successful} successful, {failed} failed, ${total_cost:.6f} total cost")
         
         return results
     
@@ -219,7 +246,7 @@ class ReplayEngine:
         ]
         
         output_lower = output.lower()
-        check_text = output_lower[:200]
+        check_text = output_lower[:200]  # Check first 200 chars
         
         for phrase in refusal_phrases:
             if phrase in check_text:

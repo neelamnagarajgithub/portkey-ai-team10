@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+import json
 
 
 class HistoricalPrompt(BaseModel):
@@ -46,6 +47,12 @@ class ReplayResult(BaseModel):
     schema_valid: bool = True
     
     timestamp: datetime = Field(default_factory=datetime.now)
+    
+    class Config:
+        # Prevent scientific notation in JSON
+        json_encoders = {
+            float: lambda v: float(f"{v:.6f}") if abs(v) < 1 else round(v, 2)
+        }
 
 
 class QualityMetrics(BaseModel):
@@ -68,6 +75,12 @@ class QualityMetrics(BaseModel):
     # Quality scores
     consistency_score: float = Field(ge=0.0, le=1.0, description="How consistent outputs are")
     schema_compliance_rate: float = Field(ge=0.0, le=1.0)
+    
+    class Config:
+        # Prevent scientific notation in JSON
+        json_encoders = {
+            float: lambda v: float(f"{v:.6f}") if abs(v) < 1 else round(v, 2)
+        }
 
 
 class ParetoPoint(BaseModel):
@@ -76,6 +89,11 @@ class ParetoPoint(BaseModel):
     cost: float
     quality: float
     is_optimal: bool = False
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: float(f"{v:.6f}") if abs(v) < 1 else round(v, 4)
+        }
 
 
 class Recommendation(BaseModel):
@@ -95,6 +113,11 @@ class Recommendation(BaseModel):
     
     # Risk assessment
     risks: List[str] = Field(default_factory=list)
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 2) if v > 1 else float(f"{v:.6f}")
+        }
 
 
 class ReplayRequest(BaseModel):
@@ -115,3 +138,8 @@ class AnalysisReport(BaseModel):
     recommendation: Recommendation
     all_results: List[ReplayResult]
     generated_at: datetime = Field(default_factory=datetime.now)
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: float(f"{v:.6f}") if abs(v) < 1 else round(v, 2)
+        }

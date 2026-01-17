@@ -1,175 +1,153 @@
-"""
-FastAPI Main Application
-Exposes REST API for the Cost-Quality Optimization System
-"""
-
-import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
-import uvicorn
+from fastapi.responses import Response
+import logging
+import json
+from typing import Any
 
-from backend.schemas import (
-    ReplayRequest,
-    AnalysisReport,
-    HistoricalPrompt,
-    ReplayResult,
-    QualityMetrics,
-    Recommendation,
-    ParetoPoint
-)
+from backend.schemas import ReplayRequest, AnalysisReport
 from backend.replay_engine import replay_engine
 from backend.quality_scorer import quality_scorer
 from backend.recommender import recommendation_engine
 
-# Setup logging
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(
-    title="Cost-Quality Optimization System",
-    description="Replay historical LLM prompts across models to find optimal cost-quality trade-offs",
-    version="1.0.0"
-)
+app = FastAPI(title="LLM Cost-Quality Optimizer", version="1.0.0")
 
-# Enable CORS for frontend
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+def custom_float_encoder(obj: Any) -> Any:
+    """Custom JSON encoder that formats floats without scientific notation"""
+    if isinstance(obj, float):
+        # Format very small numbers with 6 decimals
+        if abs(obj) < 0.0001 and obj != 0:
+            return float(f"{obj:.6f}")
+        # Format small numbers (< 1) with 6 decimals
+        elif abs(obj) < 1:
+            return float(f"{obj:.6f}")
+        # Format percentages/larger numbers with 2 decimals
+        elif abs(obj) < 100:
+            return round(obj, 4)
+        else:
+            return round(obj, 2)
+    return obj
+
+
+def serialize_for_json(obj: Any) -> Any:
+    """Recursively serialize objects, formatting floats properly"""
+    if isinstance(obj, dict):
+        return {k: serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        return custom_float_encoder(obj)
+    elif hasattr(obj, 'model_dump'):  # Pydantic model
+        return serialize_for_json(obj.model_dump())
+    elif hasattr(obj, '__dict__'):
+        return serialize_for_json(obj.__dict__)
+    else:
+        return obj
+
+
 @app.get("/")
 async def root():
-    """Health check endpoint"""
     return {
-        "status": "ok",
-        "service": "Cost-Quality Optimization System",
-        "version": "1.0.0"
+        "message": "LLM Cost-Quality Optimizer API",
+        "version": "1.0.0",
+        "endpoints": {
+            "replay": "/api/replay",
+            "health": "/health"
+        }
     }
 
 
-@app.post("/api/replay", response_model=AnalysisReport)
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+@app.post("/api/replay")
 async def replay_and_analyze(request: ReplayRequest):
     """
-    Main endpoint: Replay prompts across models and return analysis
-    
-    - Replays all prompts with all specified models
-    - Calculates quality metrics per model
-    - Finds Pareto frontier
-    - Generates smart recommendation
+    Replay historical prompts across multiple models and generate recommendations
     """
+    logger.info(f"Received replay request: {len(request.prompts)} prompts, {len(request.models)} models")
     
-    try:
-        logger.info(f"Received replay request: {len(request.prompts)} prompts, {len(request.models)} models")
-        
-        # Validate input
-        if not request.prompts:
-            raise HTTPException(status_code=400, detail="No prompts provided")
-        
-        if not request.models:
-            raise HTTPException(status_code=400, detail="No models specified")
-        
-        if len(request.models) < 2:
-            raise HTTPException(status_code=400, detail="At least 2 models required for comparison")
-        
-        # Step 1: Replay prompts across all models
-        results = replay_engine.replay_batch(
-            prompts=request.prompts,
-            models=request.models,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens
-        )
-        print(results)
-        # Step 2: Calculate quality metrics per model
-        metrics_dict = quality_scorer.aggregate_metrics(results)
-        
-        # Step 3: Find Pareto frontier
-        pareto_frontier = recommendation_engine.find_pareto_frontier(metrics_dict)
-        
-        # Step 4: Generate recommendation
-        recommendation = recommendation_engine.recommend(metrics_dict)
-        
-        # Build response
-        report = AnalysisReport(
-            summary=metrics_dict,
-            pareto_frontier=pareto_frontier,
-            recommendation=recommendation,
-            all_results=results
-        )
-        
-        logger.info(f"Analysis complete. Recommended: {recommendation.recommended_model}")
-        
-        return report
-        
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    except Exception as e:
-        logger.error(f"Error during replay: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-
-
-@app.post("/api/quick-test")
-async def quick_test(models: List[str]):
-    """
-    Quick test endpoint - replays a simple prompt across specified models
-    Useful for testing the system
-    """
-    
-    test_prompt = HistoricalPrompt(
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "What is 2+2? Answer in one sentence."}
-        ],
-        metadata={"test": True}
+    # Run replay
+    results = replay_engine.replay_batch(
+        prompts=request.prompts,
+        models=request.models,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens
     )
     
-    request = ReplayRequest(
-        prompts=[test_prompt],
-        models=models,
-        temperature=0.0,
-        max_tokens=100
+    # Calculate quality metrics
+    metrics_dict = quality_scorer.aggregate_metrics(results)
+    
+    # Generate recommendation
+    recommendation = recommendation_engine.recommend(metrics_dict)
+    
+    # Find Pareto frontier
+    pareto_frontier = recommendation_engine.find_pareto_frontier(metrics_dict)
+    
+    # Build report
+    report = AnalysisReport(
+        summary=metrics_dict,
+        pareto_frontier=pareto_frontier,
+        recommendation=recommendation,
+        all_results=results
     )
     
-    return await replay_and_analyze(request)
-
-
-@app.get("/api/models")
-async def get_supported_models():
-    """Return list of commonly supported models"""
-    return {
-        "openai": [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4",
-            "gpt-3.5-turbo"
-        ],
-        "anthropic": [
-            "claude-3-5-sonnet-20250122",
-            "claude-3-5-haiku-20250122",
-            "claude-3-opus-20240229"
-        ],
-        "google": [
-            "gemini-2.5-pro",
-            "gemini-2.5-flash"
-        ]
-    }
+    logger.info(f"Analysis complete. Recommended: {recommendation.recommended_model}")
+    
+    # Convert to dict
+    report_dict = report.model_dump()
+    
+    # Serialize to JSON
+    json_str = json.dumps(report_dict, indent=2, default=str)
+    
+    # **FIX: Replace all scientific notation with decimal notation**
+    import re
+    
+    def replace_scientific(match):
+        """Replace scientific notation with decimal"""
+        num_str = match.group(0)
+        num = float(num_str)
+        
+        # Format based on magnitude
+        if abs(num) < 0.0001 and num != 0:
+            return f"{num:.6f}"
+        elif abs(num) < 1:
+            return f"{num:.6f}"
+        elif abs(num) < 100:
+            return f"{num:.4f}"
+        else:
+            return f"{num:.2f}"
+    
+    # Pattern matches: 1.23e-05, 4.5e+10, etc.
+    pattern = r'\d+\.?\d*e[+-]?\d+'
+    json_str = re.sub(pattern, replace_scientific, json_str, flags=re.IGNORECASE)
+    
+    return Response(
+        content=json_str,
+        media_type="application/json"
+    )
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
