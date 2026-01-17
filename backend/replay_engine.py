@@ -29,15 +29,15 @@ class ReplayEngine:
         
         # Provider to model mapping
         self.provider_map = {
-            "gpt-4o": "openai",
-            "gpt-4o-mini": "openai",
-            "gpt-4": "openai",
-            "gpt-3.5-turbo": "openai",
-            "claude-3-5-sonnet-20250122": "anthropic",
-            "claude-3-5-haiku-20250122": "anthropic",
-            "claude-3-opus-20240229": "anthropic",
-            "gemini-2.0-flash-exp": "vertex-ai",
-            "gemini-1.5-pro": "vertex-ai",
+            "gpt-4o": "@openai/gpt-4o",
+            "gpt-4o-mini": "@openai/gpt-4o-mini",
+            "gpt-4": "@openai/gpt-4",
+            "gpt-3.5-turbo": "@openai/gpt-3.5-turbo",
+            "@vertex/gemini-2.5-pro": "@vertex/gemini-2.5-pro",
+            "@vertex/meta.llama-3.2-90b-vision-instruct-maas": "@vertex/meta.llama-3.2-90b-vision-instruct-maas",
+            "@vertex/llama3_1@llama-3.1-8b-instruct": "@vertex/llama3_1@llama-3.1-8b-instruct",
+            # "gemini-2.0-flash-exp": "@vertex-ai/gemini-2.0-flash-exp",
+            # "gemini-1.5-pro": "@vertex-ai/gemini-1.5-pro",
         }
         
         logger.info("ReplayEngine initialized successfully with Model Catalog")
