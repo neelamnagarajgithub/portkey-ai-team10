@@ -4,12 +4,17 @@ Exposes REST API for the Cost-Quality Optimization System
 """
 
 import logging
+import re
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from typing import List
 import uvicorn
+import json
+from datetime import datetime
+from decimal import Decimal
 
-from schemas import (
+from backend.schemas import (
     ReplayRequest,
     AnalysisReport,
     HistoricalPrompt,
@@ -18,9 +23,9 @@ from schemas import (
     Recommendation,
     ParetoPoint
 )
-from replay_engine import replay_engine
-from quality_scorer import quality_scorer
-from recommender import recommendation_engine
+from backend.replay_engine import replay_engine
+from backend.quality_scorer import quality_scorer
+from backend.recommender import recommendation_engine
 
 # Setup logging
 logging.basicConfig(
@@ -28,6 +33,34 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def custom_json_serializer(obj):
+    """Custom serializer for datetime objects and decimals"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+def convert_floats_in_dict(obj):
+    """Recursively convert scientific notation floats to regular floats in dict/list"""
+    if isinstance(obj, dict):
+        return {k: convert_floats_in_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_in_dict(item) for item in obj]
+    elif isinstance(obj, float):
+        # Convert to string without scientific notation
+        if abs(obj) < 0.0001 and obj != 0:
+            return float(f"{obj:.10f}".rstrip('0').rstrip('.'))
+        elif abs(obj) < 1:
+            return float(f"{obj:.10f}".rstrip('0').rstrip('.'))
+        else:
+            return obj
+    else:
+        return obj
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -56,15 +89,10 @@ async def root():
     }
 
 
-@app.post("/api/replay", response_model=AnalysisReport)
+@app.post("/api/replay")
 async def replay_and_analyze(request: ReplayRequest):
     """
     Main endpoint: Replay prompts across models and return analysis
-    
-    - Replays all prompts with all specified models
-    - Calculates quality metrics per model
-    - Finds Pareto frontier
-    - Generates smart recommendation
     """
     
     try:
@@ -85,7 +113,9 @@ async def replay_and_analyze(request: ReplayRequest):
             prompts=request.prompts,
             models=request.models,
             temperature=request.temperature,
-            max_tokens=request.max_tokens
+            max_tokens=request.max_tokens,
+            use_validation=True,
+            validation_phase="production"
         )
         
         # Step 2: Calculate quality metrics per model
@@ -107,7 +137,18 @@ async def replay_and_analyze(request: ReplayRequest):
         
         logger.info(f"Analysis complete. Recommended: {recommendation.recommended_model}")
         
-        return report
+        # Convert to dict
+        report_dict = report.model_dump()
+        
+        # Convert scientific notation floats BEFORE JSON serialization
+        report_dict = convert_floats_in_dict(report_dict)
+        
+        # Return as JSONResponse (FastAPI handles serialization)
+        return JSONResponse(
+            content=json.loads(
+                json.dumps(report_dict, default=custom_json_serializer)
+            )
+        )
         
     except ValueError as e:
         logger.error(f"Validation error: {e}")
@@ -147,20 +188,12 @@ async def quick_test(models: List[str]):
 async def get_supported_models():
     """Return list of commonly supported models"""
     return {
-        "openai": [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4",
-            "gpt-3.5-turbo"
-        ],
-        "anthropic": [
-            "claude-3-5-sonnet-20250122",
-            "claude-3-5-haiku-20250122",
-            "claude-3-opus-20240229"
-        ],
-        "google": [
-            "gemini-2.5-pro",
-            "gemini-2.5-flash"
+        "models": [
+            {"id": "gpt-4o", "name": "GPT-4o", "provider": "OpenAI"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "OpenAI"},
+            {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "provider": "OpenAI"},
+            {"id": "claude-3-5-sonnet-20250122", "name": "Claude 3.5 Sonnet", "provider": "Anthropic"},
+            {"id": "claude-3-5-haiku-20250122", "name": "Claude 3.5 Haiku", "provider": "Anthropic"},
         ]
     }
 
@@ -169,7 +202,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8001,
         reload=True,
         log_level="info"
     )

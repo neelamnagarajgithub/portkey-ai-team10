@@ -7,7 +7,7 @@ import logging
 from typing import List, Dict
 from collections import defaultdict
 import statistics
-from schemas import ReplayResult, QualityMetrics
+from backend.schemas import ReplayResult, QualityMetrics
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,10 @@ class QualityScorer:
             schema_compliant = [r for r in successful if r.schema_valid]
             schema_compliance_rate = len(schema_compliant) / successful_count if successful_count > 0 else 0.0
             
+            # Validation scores (from hybrid validator)
+            validated = [r for r in successful if r.validation_score is not None]
+            avg_validation_score = statistics.mean([r.validation_score for r in validated]) if validated else 0.0
+            
             metrics[model] = QualityMetrics(
                 model=model,
                 total_calls=total_calls,
@@ -100,7 +104,8 @@ class QualityScorer:
                 p50_latency_ms=p50_latency,
                 p95_latency_ms=p95_latency,
                 consistency_score=consistency_score,
-                schema_compliance_rate=schema_compliance_rate
+                schema_compliance_rate=schema_compliance_rate,
+                avg_validation_score=avg_validation_score
             )
         
         return metrics
@@ -119,19 +124,24 @@ class QualityScorer:
         Calculate overall quality score (0.0 to 1.0)
         
         Weighted combination of:
-        - Consistency: 40%
-        - Schema compliance: 30%
-        - Success rate: 20%
-        - Low refusal rate: 10%
+        - Validation score (LLM judge/heuristics): 50%  (NEW!)
+        - Consistency: 20%
+        - Schema compliance: 15%
+        - Success rate: 10%
+        - Low refusal rate: 5%
         """
         success_rate = metrics.successful_calls / metrics.total_calls if metrics.total_calls > 0 else 0.0
         refusal_score = 1.0 - metrics.refusal_rate
         
+        # Normalize validation score to 0-1
+        validation_score = metrics.avg_validation_score / 100.0
+        
         quality = (
-            (metrics.consistency_score * 0.4) +
-            (metrics.schema_compliance_rate * 0.3) +
-            (success_rate * 0.2) +
-            (refusal_score * 0.1)
+            (validation_score * 0.5) +
+            (metrics.consistency_score * 0.2) +
+            (metrics.schema_compliance_rate * 0.15) +
+            (success_rate * 0.1) +
+            (refusal_score * 0.05)
         )
         
         return min(1.0, max(0.0, quality))

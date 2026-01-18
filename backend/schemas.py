@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 
@@ -38,12 +38,22 @@ class ReplayResult(BaseModel):
     total_tokens: int = 0
     cost_usd: float = 0.0
     
+    @field_serializer('cost_usd')
+    def serialize_cost(self, value: float) -> float:
+        """Round cost to 8 decimal places to avoid scientific notation"""
+        return round(value, 8) if value else 0.0
+    
     # Performance metrics
     latency_ms: float = 0.0
     
     # Quality indicators
     is_refusal: bool = False
     schema_valid: bool = True
+    
+    # Validation scores (from hybrid validator)
+    validation_score: Optional[float] = None
+    validation_method: Optional[str] = None
+    validation_confidence: Optional[str] = None
     
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -68,6 +78,7 @@ class QualityMetrics(BaseModel):
     # Quality scores
     consistency_score: float = Field(ge=0.0, le=1.0, description="How consistent outputs are")
     schema_compliance_rate: float = Field(ge=0.0, le=1.0)
+    avg_validation_score: float = Field(default=0.0, ge=0.0, le=100.0, description="Average validation score from hybrid validator")
 
 
 class ParetoPoint(BaseModel):
