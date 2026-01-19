@@ -90,4 +90,5 @@ Interactive Dashboard
 - A/B testing automation
 
 ## License
-JMV
+MIT
+
